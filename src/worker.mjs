@@ -1,7 +1,11 @@
 import { Buffer } from "node:buffer";
+import { CloudflareLogger } from "./logger";
+import { sanitizeHeaders, extractContent } from "./utils";
 
 export default {
-  async fetch (request) {
+  async fetch(request, env) {
+
+    const logger = new CloudflareLogger(env);
     if (request.method === "OPTIONS") {
       return handleOPTIONS();
     }
@@ -14,30 +18,47 @@ export default {
       const apiKey = auth?.split(" ")[1];
       const assert = (success) => {
         if (!success) {
-          throw new HttpError("The specified HTTP method is not allowed for the requested resource", 400);
+          throw new HttpError(
+            "The specified HTTP method is not allowed for the requested resource",
+            400
+          );
         }
       };
       const { pathname } = new URL(request.url);
       switch (true) {
         case pathname.endsWith("/chat/completions"):
           assert(request.method === "POST");
-          return handleCompletions(await request.json(), apiKey)
-            .catch(errHandler);
+
+          await logger.log("chat/completions/request", {
+            method: request.method,
+            headers: sanitizeHeaders(request.headers),
+            body: request.json(),
+          });
+
+          return handleCompletions(await request.json(), apiKey).catch(
+            errHandler
+          );
         case pathname.endsWith("/embeddings"):
           assert(request.method === "POST");
-          return handleEmbeddings(await request.json(), apiKey)
-            .catch(errHandler);
+
+           await logger.log("embeddings/request", {
+             method: request.method,
+             headers: sanitizeHeaders(request.headers),
+             body: request.json(),
+           });
+          return handleEmbeddings(await request.json(), apiKey).catch(
+            errHandler
+          );
         case pathname.endsWith("/models"):
           assert(request.method === "GET");
-          return handleModels(apiKey)
-            .catch(errHandler);
+          return handleModels(apiKey).catch(errHandler);
         default:
           throw new HttpError("404 Not Found", 404);
       }
     } catch (err) {
       return errHandler(err);
     }
-  }
+  },
 };
 
 class HttpError extends Error {

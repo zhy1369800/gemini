@@ -2,3 +2,8 @@ name = "gemini"
 main = "src/worker.mjs"
 compatibility_date = "2024-09-23"
 compatibility_flags = [ "nodejs_compat" ]
+
+# 添加 KV 命名空间用于存储日志
+kv_namespaces = [
+  { binding = "LOGS_KV", id = "1a120c82359344039a64a1542dd4e1e6" }
+] 
