@@ -4,7 +4,7 @@
   },
   "devDependencies": {
     "nodemon": "3",
-    "wrangler": "^4.22.0"
+    "wrangler": "^3.0.0"
   },
   "scripts": {
     "deploy": "wrangler deploy",
@@ -15,5 +15,6 @@
     "start:bun": "bun bun.mjs",
     "dev:bun": "bun --watch bun.mjs"
   },
+
   "name": "gemini"
 }
