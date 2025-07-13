@@ -196,20 +196,20 @@ async function handleCompletions(req, apiKey, logger) {
     url += "?alt=sse";
   }
 
-     await logger.log("chat/api/request", {
-       body: body,
-     });
-  
+  await logger.log("chat/api/request", body);
+
   const response = await fetch(url, {
     method: "POST",
     headers: makeHeaders(apiKey, { "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
 
-  body = response.body;
-   await logger.log("api/response", {
-     content: body,
-   });
+  let resForLogg = await response.clone();
+  const rawBody = await resForLogg.text();
+
+  // 防止被消费，获取不到，需克隆
+  await logger.log("api/response", rawBody);
+
   if (response.ok) {
     let id = "chatcmpl-" + generateId(); //"chatcmpl-8pMMaqXMK68B3nyDBrapTDrhkHBQK";
     const shared = {};
@@ -238,6 +238,7 @@ async function handleCompletions(req, apiKey, logger) {
         .pipeThrough(new TextEncoderStream());
     } else {
       body = await response.text();
+
       try {
         body = JSON.parse(body);
         if (!body.candidates) {
@@ -249,10 +250,17 @@ async function handleCompletions(req, apiKey, logger) {
       }
       body = processCompletionsResponse(body, model, id);
     }
+  } else {
+    body = rawBody;
   }
 
- 
-  return new Response(body, fixCors(response));
+  let res = await new Response(body, fixCors(response));
+  resForLogg = res.clone();
+
+  const responseBody = await resForLogg.text();
+  await logger.log("response", responseBody);
+
+  return res;
 }
 
 const adjustProps = (schemaPart) => {
@@ -472,45 +480,44 @@ const transformMessages = async (messages) => {
   const contents = [];
   let system_instruction;
   for (const item of messages) {
-
-    if(item.role){
+    if (item.role) {
       switch (item.role) {
-      case "system":
-        system_instruction = { parts: await transformMsg(item) };
-        continue;
-      case "tool":
-        // eslint-disable-next-line no-case-declarations
-        let { role, parts } = contents[contents.length - 1] ?? {};
-        if (role !== "function") {
-          const calls = parts?.calls;
-          parts = [];
-          parts.calls = calls;
-          contents.push({
-            role: "function", // ignored
-            parts,
-          });
-        }
-        transformFnResponse(item, parts);
-        continue;
-      case "assistant":
-        item.role = "model";
-        break;
-      case "user":
-        break;
-      default:
-        throw new HttpError(`Unknown message role: "${item.role}"`, 400);
+        case "system":
+          system_instruction = { parts: await transformMsg(item) };
+          continue;
+        case "tool":
+          // eslint-disable-next-line no-case-declarations
+          let { role, parts } = contents[contents.length - 1] ?? {};
+          if (role !== "function") {
+            const calls = parts?.calls;
+            parts = [];
+            parts.calls = calls;
+            contents.push({
+              role: "function", // ignored
+              parts,
+            });
+          }
+          transformFnResponse(item, parts);
+          continue;
+        case "assistant":
+          item.role = "model";
+          break;
+        case "user":
+          break;
+        default:
+          throw new HttpError(`Unknown message role: "${item.role}"`, 400);
+      }
     }
-    }
-    
-   const content = {
+
+    const content = {
       parts: item.tool_calls
         ? transformFnCalls(item)
         : await transformMsg(item),
-    }
-    if (item.role) { 
+    };
+    if (item.role) {
       content.role = item.role;
     }
-      
+
     contents.push(content);
   }
   if (system_instruction) {
@@ -572,7 +579,7 @@ const reasonsMap = {
 };
 const SEP = "\n\n|>";
 const transformCandidates = (key, cand) => {
-  const message = { role: "assistant", content: [], inlineData: [] };
+  const message = { role: "assistant", content: [] };
   for (const part of cand.content?.parts ?? []) {
     if (part.functionCall) {
       const fc = part.functionCall;
@@ -586,10 +593,18 @@ const transformCandidates = (key, cand) => {
         },
       });
     } else {
-      message.content.push(part.text);
+      if (part.text && part.text != "null") message.content.push(part.text);
 
-      if (part.inlineData && part.inlineData !='null')
-        message.inlineData.push(part.inlineData);
+      if (part.inlineData && part.inlineData != "null") {
+        if (Array.isArray(part.inlineData)) {
+          part.inlineData.map((item) => (item.mime_type = item.mimeType));
+        } else {
+          part.inlineData.mime_type = part.inlineData.mimeType;
+        }
+
+        message.inline_data = message.inline_data ?? [];
+        message.inline_data.push(part.inlineData);
+      }
     }
   }
   message.content = message.content.join(SEP) || null;
